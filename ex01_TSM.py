@@ -2,7 +2,8 @@ import math
 import time
 from collections import defaultdict
 import matplotlib.pyplot as plt
-
+import os
+import csv
 
 def parse_tsp_file(file_path):
     """
@@ -68,17 +69,23 @@ def swap_edges(tour, i, j):
         tour[i], tour[j] = tour[j], tour[i]
         i += 1
         j -= 1
-def two_opt_optimized(tour, nodes, max_iterations=1000):
+
+def two_opt_optimized(tour, nodes, max_iterations=1000, time_limit=600):
     """
     Optimized 2-Opt heuristic to minimize the total tour length.
-    Uses input data from files as the initial tour.
+    Stops execution after a specified time limit.
     """
     n = len(tour)  # Number of nodes in the tour
     found_improvement = True
     iterations = 0
     current_length = calculate_total_distance(tour, nodes)
+    start_time = time.time()
 
     while found_improvement and iterations < max_iterations:
+        if time.time() - start_time > time_limit:
+            print(f"Time limit of {time_limit} seconds reached for 2-Opt.")
+            break
+
         found_improvement = False
         for i in range(n - 1):
             for j in range(i + 2, n):  # Ensure valid 2-Opt pairs
@@ -104,76 +111,6 @@ def two_opt_optimized(tour, nodes, max_iterations=1000):
     return tour, final_length
 
 
-
-def create_grid(nodes, cell_size):
-    """
-    Creates a grid-based spatial index for the nodes.
-    """
-    grid = defaultdict(list)
-    for node_id, (x, y) in nodes.items():
-        cell = (int(x // cell_size), int(y // cell_size))
-        grid[cell].append(node_id)
-    return grid
-
-def find_neighbors(grid, nodes, cell_size, x, y):
-    """
-    Finds neighbors of a point (x, y) in the grid.
-    """
-    neighbors = []
-    cell_x, cell_y = int(x // cell_size), int(y // cell_size)
-    for dx in [-1, 0, 1]:
-        for dy in [-1, 0, 1]:
-            cell = (cell_x + dx, cell_y + dy)
-            neighbors.extend(grid.get(cell, []))
-    return neighbors
-
-def two_opt_optimized_partial(tour, nodes, cell_size=10, max_iterations=1000):
-    """
-    Optimized 2-Opt heuristic using partial distance computation and grid-based locality.
-    """
-    grid = create_grid(nodes, cell_size)
-    improved = True
-    edge_swaps = 0
-    iterations = 0
-
-    while improved and iterations < max_iterations:
-        improved = False
-        for i in range(1, len(tour) - 1):
-            for j in range(i + 1, len(tour)):
-                if j - i == 1:  # Consecutive edges, no change
-                    continue
-
-                # Only check edges that are spatially near
-                x, y = nodes[tour[i]]
-                neighbors = find_neighbors(grid, nodes, cell_size, x, y)
-                if tour[j] not in neighbors:
-                    continue
-
-                # Compute distances only for the affected edges
-                a, b = tour[i - 1], tour[i]
-                c, d = tour[j], tour[(j + 1) % len(tour)]
-                original_cost = euclidean_distance(nodes[a], nodes[b]) + euclidean_distance(nodes[c], nodes[d])
-                new_cost = euclidean_distance(nodes[a], nodes[c]) + euclidean_distance(nodes[b], nodes[d])
-
-                # Debugging: Log distances and swap decision
-                #print(f"Checking swap: {a}-{b} with {c}-{d} | Original Cost: {original_cost}, New Cost: {new_cost}")
-
-                # If swap reduces the cost, apply it
-                if new_cost < original_cost:
-                    #print(f"Applying swap between {a}-{b} and {c}-{d}")
-                    tour = tour[:i] + tour[i:j][::-1] + tour[j:]
-                    edge_swaps += 1
-                    improved = True
-        iterations += 1
-
-    # Debugging: Log final distance
-    final_distance = calculate_total_distance(tour, nodes)
-    print(f"Final 2-Opt Distance: {final_distance}, Swaps: {edge_swaps}")
-    return tour, edge_swaps
-
-
-
-
 def run_experiments(file_path, bound):
     """
     Runs both heuristics on a given TSP instance and compares results.
@@ -191,8 +128,7 @@ def run_experiments(file_path, bound):
     # 2-Opt Using Input Order
     print("Running 2-Opt on input order...")
     start_time = time.time()
-    #opt_tour_input, edge_swaps_input = two_opt_optimized_partial(input_order, nodes)
-    opt_tour_input, edge_swaps_input = two_opt_optimized(input_order, nodes)
+    opt_tour_input, edge_swaps_input = two_opt_optimized(input_order, nodes, time_limit=600)
     opt_time_input = time.time() - start_time
     opt_distance_input = calculate_total_distance(opt_tour_input, nodes)
     opt_ratio_input = opt_distance_input / bound
@@ -200,11 +136,11 @@ def run_experiments(file_path, bound):
     # 2-Opt Using NN Tour
     print("Running 2-Opt on NN tour...")
     start_time = time.time()
-    #opt_tour_nn, edge_swaps_nn = two_opt_optimized_partial(nn_tour, nodes)
-    opt_tour_nn, edge_swaps_nn = two_opt_optimized(nn_tour, nodes)
+    opt_tour_nn, edge_swaps_nn = two_opt_optimized(nn_tour, nodes, time_limit=600)
     opt_time_nn = time.time() - start_time
     opt_distance_nn = calculate_total_distance(opt_tour_nn, nodes)
     opt_ratio_nn = opt_distance_nn / bound
+
 
     return {
         "NN Distance": nn_distance,
@@ -302,31 +238,50 @@ instance_bounds = {
 def main():
     user_choice = input("type 1 for 25 results, 2 to compute and plot for 3 instances: ")
     if user_choice == "1":
-        instances = {
-        "dj38.tsp": 6656,
-        "qa194.tsp": 9352,
-        "lu980.tsp": 11340
-        # Add more instances and bounds here
-        }
+        
+        current_directory = os.path.dirname(os.path.abspath(__file__))
+        tsp_files = [os.path.join(current_directory, f) for f in os.listdir(current_directory) if f.endswith('.tsp')]
+
+        if not tsp_files:
+            print("No .tsp files found in the current directory.")
+            return
+
+        # Match files with bounds
+        instances = {}
+        for file_path in tsp_files:
+            instance_name = os.path.splitext(os.path.basename(file_path))[0]
+            if instance_name in instance_bounds:
+                instances[file_path] = instance_bounds[instance_name]
+            else:
+                print(f"Warning: No bound found for {instance_name}. Skipping this file.")
+
+        if not instances:
+            print("No valid TSP instances found.")
+            return
 
         results = []
         for file_path, bound in instances.items():
-            print(f"Running experiments on {file_path} with bound {bound}...")
+            print(f"Running experiments {instance_name} with bound {bound}...")
             result = run_experiments(file_path, bound)
-            result["Instance"] = file_path
+            result["Instance"] = os.path.basename(file_path)
             results.append(result)
             print(f"Results for {file_path}:", result)
             print("\n")
 
-        # Print results in table format
-        print("Instance", "NN Distance", "NN Time", "NN Ratio", 
-            "2-Opt Input Distance", "2-Opt Input Time", "2-Opt Input Ratio", "2-Opt Input Swaps",
-            "2-Opt NN Distance", "2-Opt NN Time", "2-Opt NN Ratio", "2-Opt NN Swaps", sep="\t")
-        for r in results:
-            print(r["Instance"], r["NN Distance"], f"{r['NN Time']:.4f}", f"{r['NN Ratio']:.4f}",
-                r["2-Opt Input Distance"], f"{r['2-Opt Input Time']:.4f}", f"{r['2-Opt Input Ratio']:.4f}", r["2-Opt Input Swaps"],
-                r["2-Opt NN Distance"], f"{r['2-Opt NN Time']:.4f}", f"{r['2-Opt NN Ratio']:.4f}", r["2-Opt NN Swaps"], sep="\t")
-        
+        # Save results to a CSV file in the current directory
+        output_csv = os.path.join(current_directory, "results.csv")
+        with open(output_csv, mode='w', newline='') as csvfile:
+            fieldnames = [
+                "Instance", "NN Distance", "NN Time", "NN Ratio",
+                "2-Opt Input Distance", "2-Opt Input Time", "2-Opt Input Ratio", "2-Opt Input Swaps",
+                "2-Opt NN Distance", "2-Opt NN Time", "2-Opt NN Ratio", "2-Opt NN Swaps"
+            ]
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(results)
+
+        print(f"Results saved to {output_csv}")
+
     elif user_choice == "2":
         print("Computing and plotting for 3 instances...")
         # Visualize for dj38.tsp, qa194.tsp, lu980.tsp
