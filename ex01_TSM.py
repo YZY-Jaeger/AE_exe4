@@ -75,12 +75,13 @@ def two_opt_optimized(tour, nodes, max_iterations=1000, time_limit=600):
     Optimized 2-Opt heuristic to minimize the total tour length.
     Stops execution after a specified time limit.
     """
+    tour = tour.copy()  # Create a copy of the input tour to avoid modifying the original
     n = len(tour)  # Number of nodes in the tour
     found_improvement = True
     iterations = 0
     current_length = calculate_total_distance(tour, nodes)
     start_time = time.time()
-
+    count_edgeswap = 0
     while found_improvement and iterations < max_iterations:
         if time.time() - start_time > time_limit:
             print(f"Time limit of {time_limit} seconds reached for 2-Opt.")
@@ -100,15 +101,59 @@ def two_opt_optimized(tour, nodes, max_iterations=1000, time_limit=600):
                 # If a swap reduces the total length, perform the swap
                 if length_delta < 0:
                     swap_edges(tour, i, j)
+                    count_edgeswap += 1
                     current_length += length_delta
                     found_improvement = True
-
         iterations += 1
 
     # Return the optimized tour and its length
     final_length = calculate_total_distance(tour, nodes)
     print(f"2-Opt completed: Iterations = {iterations}, Final Distance = {final_length:.1f}")
-    return tour, final_length
+    return tour, final_length, count_edgeswap
+
+def two_opt_optimized_intermediate(tour, nodes, max_edgeswap = 1000, time_limit=600):
+    """
+    Optimized 2-Opt heuristic to minimize the total tour length.
+    Stops execution after a specified time limit.
+    """
+    tour = tour.copy()  # Create a copy of the input tour to avoid modifying the original
+    n = len(tour)  # Number of nodes in the tour
+    found_improvement = True
+    iterations = 0
+    current_length = calculate_total_distance(tour, nodes)
+    start_time = time.time()
+    count_edgeswap = 0
+    while found_improvement:
+        if time.time() - start_time > time_limit:
+            print(f"Time limit of {time_limit} seconds reached for 2-Opt.")
+            break
+        found_improvement = False
+        for i in range(n - 1):
+            for j in range(i + 2, n):  # Ensure valid 2-Opt pairs
+                # Calculate the change in distance for swapping edges (i, i+1) and (j, j+1)
+                length_delta = (
+                    -euclidean_distance(nodes[tour[i]], nodes[tour[i + 1]])
+                    - euclidean_distance(nodes[tour[j]], nodes[tour[(j + 1) % n]])
+                    + euclidean_distance(nodes[tour[i]], nodes[tour[j]])
+                    + euclidean_distance(nodes[tour[i + 1]], nodes[tour[(j + 1) % n]])
+                )
+
+                # If a swap reduces the total length, perform the swap
+                if length_delta < 0:
+                    swap_edges(tour, i, j)
+                    count_edgeswap += 1
+                    current_length += length_delta
+                    found_improvement = True
+                    if count_edgeswap >= max_edgeswap:  # Stop after a certain number of edge swaps
+                        inter_length = calculate_total_distance(tour, nodes)
+                        return tour, inter_length, count_edgeswap 
+        iterations += 1
+
+    # Return the optimized tour and its length
+    final_length = calculate_total_distance(tour, nodes)
+    print(f"2-Opt completed: Iterations = {iterations}, Final Distance = {final_length:.1f}")
+    return tour, final_length, count_edgeswap
+
 
 
 def run_experiments(file_path, bound):
@@ -156,52 +201,62 @@ def run_experiments(file_path, bound):
         "2-Opt NN Swaps": edge_swaps_nn,
     }
 
-def plot_tour(nodes, tour, title):
+def plot_tour(nodes, tour, instance_name, tour_type):
     """
-    Plots a given tour.
+    Plots a given tour and saves the figure with a valid filename in the /plots directory.
     """
+    title = f"{instance_name} - {tour_type}"  # Create a title using instance name and tour type
+
     x = [nodes[node][0] for node in tour + [tour[0]]]  # Add start node at the end to close the loop
     y = [nodes[node][1] for node in tour + [tour[0]]]
     
     plt.figure(figsize=(8, 8))
     plt.plot(x, y, marker='o')
-    for idx, (x_coord, y_coord) in enumerate(zip(x, y)):
-        plt.text(x_coord, y_coord, f"{tour[idx]}" if idx < len(tour) else "", fontsize=9)
+
     plt.title(title)
     plt.xlabel("X Coordinate")
     plt.ylabel("Y Coordinate")
     plt.grid(True)
-    plt.savefig(f"{title}.png")
 
-# Example Visualization Code
+    # Create the /plots directory if it doesn't exist
+    plots_directory = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'plots')
+    os.makedirs(plots_directory, exist_ok=True)  # Create the directory if it doesn't exist
+
+    # Save the plot in the /plots directory with a simplified filename
+    plt.savefig(os.path.join(plots_directory, f"{instance_name}_{tour_type}.png"))  # Save under /plots
+    plt.close()  # Close the figure to free up memory
+
+
+
+
 def visualize_tours(file_path):
     """
     Visualizes tours (a-e) for a given TSP instance.
     """
     # Parse data
     nodes, input_order = parse_tsp_file(file_path)
-
+    instance_name = os.path.basename(file_path).replace('.tsp', '')  # Get the instance name without extensionnodes, input_order = parse_tsp_file(file_path)
     # (a) Tour from Nearest Neighbor Heuristic
     nn_tour = nearest_neighbor(nodes)
-    plot_tour(nodes, nn_tour, title=f"(a) Nearest Neighbor Tour for {file_path}")
+    plot_tour(nodes, nn_tour, instance_name, "Nearest Neighbor Tour")
 
     # (b) Initial Tour (Input Order)
-    plot_tour(nodes, input_order, title=f"(b) Initial Tour (Input Order) for {file_path}")
+    plot_tour(nodes, input_order, instance_name, "Initial Tour")
 
     # (c) Intermediate Tour (Halfway through edge swaps)
-    """
-    opt_tour_input, edge_swaps_input = two_opt_optimized_partial(input_order, nodes)
-    halfway_tour = input_order.copy()
-    _, halfway_edge_swaps = two_opt_optimized_partial(input_order, nodes, max_iterations=edge_swaps_input // 2)
-    plot_tour(nodes, halfway_tour, title=f"(c) Intermediate Tour for {file_path}")
+    opt_tour_input, _,edge_swaps_input = two_opt_optimized(input_order, nodes)
+    print(f"Edge swaps for full tour: {edge_swaps_input}")
+    halfway_tour, _ ,edge_swaps_inter= two_opt_optimized_intermediate(input_order, nodes, max_edgeswap=edge_swaps_input //2)
+
+    print(f"Edge swaps for intermediate tour: {edge_swaps_inter}")
+    plot_tour(nodes, halfway_tour, instance_name, "Intermediate Tour")
 
     # (d) Final Tour from Input Order with 2-Opt
-    plot_tour(nodes, opt_tour_input, title=f"(d) Final 2-Opt Tour (Input Order) for {file_path}")
-    """
+    plot_tour(nodes, opt_tour_input, instance_name, "Final Tour (Input Order)")
+
     # (e) Final Tour from NN Tour with 2-Opt
-    #opt_tour_nn, _ = two_opt_optimized_partial(nn_tour, nodes)
-    opt_tour_nn, _ = two_opt_optimized(nn_tour, nodes)
-    plot_tour(nodes, opt_tour_nn, title=f"(e) Final 2-Opt Tour (NN Tour) for {file_path}")
+    opt_tour_nn, _ ,_= two_opt_optimized(nn_tour, nodes)
+    plot_tour(nodes, opt_tour_nn, instance_name, "Final Tour (NN Tour)")
 
 
 # Dictionary mapping instance names to their bounds
@@ -239,11 +294,11 @@ def main():
     user_choice = input("type 1 for 25 results, 2 to compute and plot for 3 instances: ")
     if user_choice == "1":
         
-        current_directory = os.path.dirname(os.path.abspath(__file__))
-        tsp_files = [os.path.join(current_directory, f) for f in os.listdir(current_directory) if f.endswith('.tsp')]
-
+        input_directory = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'inputs')
+        tsp_files = [os.path.join(input_directory, f) for f in os.listdir(input_directory) if f.endswith('.tsp')]
+        
         if not tsp_files:
-            print("No .tsp files found in the current directory.")
+            print("No .tsp files found in the /inputs directory.")
             return
 
         # Match files with bounds
@@ -269,7 +324,7 @@ def main():
             print("\n")
 
         # Save results to a CSV file in the current directory
-        output_csv = os.path.join(current_directory, "results.csv")
+        output_csv = os.path.join(os.path.dirname(os.path.abspath(__file__)), "results.csv")
         with open(output_csv, mode='w', newline='') as csvfile:
             fieldnames = [
                 "Instance", "NN Distance", "NN Time", "NN Ratio",
@@ -285,14 +340,15 @@ def main():
     elif user_choice == "2":
         print("Computing and plotting for 3 instances...")
         # Visualize for dj38.tsp, qa194.tsp, lu980.tsp
+        input_directory = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'inputs')  # Ensure this is defined
         for instance in ["dj38.tsp", "qa194.tsp", "lu980.tsp"]:
-            print(f"Visualizing tours for {instance}...")
-            visualize_tours(instance)
-
+            instance_path = os.path.join(input_directory, instance)  # Create full path
+            print(f"Visualizing tours for {instance_path}...")
+            visualize_tours(instance_path)  # Pass the full path
 
     else:
         user_choice = input("type 1 for 25 results, 2 to compute and plot for 3 instances: ")
-    
+
 
 if __name__ == "__main__":
     main()
